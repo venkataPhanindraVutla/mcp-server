@@ -11,5 +11,7 @@ async def root():
 async def status():
     return JSONResponse({
         "status": "running",
-        "tools": ["availability_tool", "booking_tool", "email_tool"]
+        "tools": ["add_doctor", "availability_tool", "booking_tool", "email_tool", "get_system_prompts"],
+        "integrations": ["SMTP", "Google Calendar"],
+        "features": ["30-minute slots", "Email confirmations", "Calendar availability checking"]
     })

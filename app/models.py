@@ -5,6 +5,7 @@ class Appointment(SQLModel, table=True):
     name: str
     email: str
     time_slot: str
+    date: str
     doctor_id: int
 
 class User(SQLModel, table=True):
