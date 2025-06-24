@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+httpx
+mcp[cli]>=1.6.0
+sqlmodel
+jinja2
+psycopg2-binary

@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Appointment Dashboard</title>
+</head>
+<body>
+    <h2>Appointments</h2>
+    <table border="1">
+        <tr><th>Name</th><th>Time Slot</th></tr>
+        {% for appt in appointments %}
+        <tr><td>{{ appt.name }}</td><td>{{ appt.time_slot }}</td></tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
