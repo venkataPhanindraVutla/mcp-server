@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlmodel import select
@@ -16,6 +15,7 @@ class UserRegister(BaseModel):
     name: str
     password: str
     role: str
+    phone: Optional[str] = None
     specialization: Optional[str] = None
 
 class UserLogin(BaseModel):
@@ -79,23 +79,24 @@ async def status():
 @router.post("/register")
 async def register_user(user_data: UserRegister):
     session = get_session()
-    
+
     # Check if user exists
     existing = session.exec(select(User).where(User.email == user_data.email)).first()
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
-    
+
     # Create user
     user = User(
         email=user_data.email,
         name=user_data.name,
         password_hash=user_data.password,  # In production, hash this
-        role=UserRole(user_data.role.lower())
+        role=UserRole(user_data.role.lower()),
+        phone=user_data.phone
     )
     session.add(user)
     session.commit()
     session.refresh(user)
-    
+
     # Create doctor profile if needed
     if user_data.role.lower() == "doctor" and user_data.specialization:
         doctor = Doctor(
@@ -106,7 +107,7 @@ async def register_user(user_data: UserRegister):
         )
         session.add(doctor)
         session.commit()
-    
+
     return {
         "message": f"{user_data.role.title()} registered successfully",
         "user": {
@@ -121,10 +122,10 @@ async def register_user(user_data: UserRegister):
 async def login_user(login_data: UserLogin):
     session = get_session()
     user = session.exec(select(User).where(User.email == login_data.email)).first()
-    
+
     if not user or user.password_hash != login_data.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
     return {
         "message": "Login successful",
         "user": {
@@ -147,7 +148,7 @@ async def get_current_user(user_id: int):
     user = session.exec(select(User).where(User.id == user_id)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     return {
         "id": user.id,
         "name": user.name,
@@ -168,11 +169,11 @@ async def add_doctor(name: str, specialization: str, email: str):
     existing = session.exec(select(Doctor).where(Doctor.email == email)).first()
     if existing:
         raise HTTPException(status_code=400, detail="Doctor already exists")
-    
+
     doctor = Doctor(name=name, specialization=specialization, email=email)
     session.add(doctor)
     session.commit()
-    
+
     return {"message": f"Doctor {name} added successfully"}
 
 @router.post("/doctors/{doctor_id}/reports")
@@ -181,11 +182,11 @@ async def get_doctor_report(doctor_id: int, report_data: ReportRequest):
     doctor = session.exec(select(Doctor).where(Doctor.id == doctor_id)).first()
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
-    
+
     # Import the MCP tool function
     from app.tools.tools import doctor_reports_tool
     report = await doctor_reports_tool(doctor_id, report_data.report_type, report_data.date_filter)
-    
+
     return {"doctor": doctor.name, "report": report}
 
 # Appointment endpoints
@@ -193,15 +194,15 @@ async def get_doctor_report(doctor_id: int, report_data: ReportRequest):
 async def get_appointments(user_id: Optional[int] = None, doctor_id: Optional[int] = None):
     session = get_session()
     query = select(Appointment)
-    
+
     if user_id:
         query = query.where(Appointment.patient_id == user_id)
     if doctor_id:
         query = query.where(Appointment.doctor_id == doctor_id)
-    
+
     appointments = session.exec(query).all()
     result = []
-    
+
     for apt in appointments:
         patient = session.exec(select(User).where(User.id == apt.patient_id)).first()
         doctor = session.exec(select(Doctor).where(Doctor.id == apt.doctor_id)).first()
@@ -214,13 +215,13 @@ async def get_appointments(user_id: Optional[int] = None, doctor_id: Optional[in
             "status": apt.status,
             "symptoms": apt.symptoms
         })
-    
+
     return result
 
 @router.post("/appointments/book")
 async def book_appointment(user_id: int, appointment_data: AppointmentRequest):
     session = get_session()
-    
+
     # Import MCP tool
     from app.tools.tools import booking_tool
     result = await booking_tool(
@@ -230,7 +231,7 @@ async def book_appointment(user_id: int, appointment_data: AppointmentRequest):
         doctor_name=appointment_data.doctor_name,
         symptoms=appointment_data.symptoms
     )
-    
+
     if "booked" in result.lower():
         return {"message": result, "status": "success"}
     else:
@@ -251,23 +252,23 @@ async def chat_with_ai(user_id: int, message: str):
     """
     # This is a placeholder for LLM integration
     # You would replace this with actual LLM API calls
-    
+
     response = f"""
     🤖 AI Assistant Response:
-    
+
     Received message: "{message}"
     User ID: {user_id}
-    
+
     Available actions:
     - Check doctor availability
     - Book appointments  
     - Generate reports
     - Send notifications
-    
+
     To implement full LLM integration, connect your preferred LLM service (OpenAI, Claude, etc.)
     and configure it to use the MCP tools defined in tools.py
     """
-    
+
     return {"response": response, "user_id": user_id}
 
 # Session management for conversation continuity

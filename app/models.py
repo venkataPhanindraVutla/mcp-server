@@ -14,6 +14,7 @@ class User(SQLModel, table=True):
     name: str
     role: UserRole
     password_hash: str
+    phone: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
@@ -25,6 +26,7 @@ class Doctor(SQLModel, table=True):
     name: str
     specialization: str
     email: str = Field(unique=True)
+    phone: Optional[str] = None
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
     
     # Relationships
