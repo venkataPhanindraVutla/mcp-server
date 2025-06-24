@@ -455,4 +455,3 @@ async def get_system_prompts() -> str:
     """
 
 __all__ = ["mcp"]
-`
