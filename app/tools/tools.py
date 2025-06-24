@@ -91,7 +91,7 @@ async def authenticate_user(email: str, password: str) -> str:
         select(User).where(User.email == email)
     ).first()
     
-    if not user or user.password_hash != password:  # In production, use proper password verification
+    if not user or user.password_hash != password: 
         return "Invalid credentials"
     
     user_info = {
