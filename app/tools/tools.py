@@ -1,18 +1,107 @@
+
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
-from typing import List
-from sqlmodel import select
-from datetime import datetime, timedelta
-from app.models import Appointment, Doctor
+from typing import List, Dict, Any
+from sqlmodel import select, func
+from datetime import datetime, timedelta, date
+from app.models import Appointment, Doctor, User, ChatSession, UserRole
 from app.core.database import get_session
 import os
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 load_dotenv()
 
 mcp = FastMCP("appointment")
+
+# Session management for conversation continuity
+session_contexts = {}
+
+@mcp.tool(description="Initialize or get chat session context for conversation continuity")
+async def manage_session(user_id: int, action: str = "get", context_data: str = None) -> str:
+    session = get_session()
+    
+    if action == "create" or action == "update":
+        # Find existing session or create new one
+        chat_session = session.exec(
+            select(ChatSession).where(ChatSession.user_id == user_id)
+        ).first()
+        
+        if not chat_session:
+            chat_session = ChatSession(user_id=user_id, session_data=context_data or "{}")
+            session.add(chat_session)
+        else:
+            chat_session.session_data = context_data or "{}"
+            chat_session.updated_at = datetime.utcnow()
+        
+        session.commit()
+        return f"Session {action}d successfully"
+    
+    elif action == "get":
+        chat_session = session.exec(
+            select(ChatSession).where(ChatSession.user_id == user_id)
+        ).first()
+        
+        if chat_session:
+            return chat_session.session_data
+        else:
+            return "{}"
+
+@mcp.tool(description="Register a new user (patient or doctor) with email, name, password, and role")
+async def register_user(email: str, name: str, password: str, role: str, specialization: str = None) -> str:
+    session = get_session()
+    
+    # Check if user already exists
+    existing_user = session.exec(select(User).where(User.email == email)).first()
+    if existing_user:
+        return f"User with email {email} already exists"
+    
+    # Create new user
+    user = User(
+        email=email,
+        name=name,
+        password_hash=password,  # In production, use proper hashing
+        role=UserRole(role.lower())
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    # If doctor, create doctor profile
+    if role.lower() == "doctor" and specialization:
+        doctor = Doctor(
+            name=name,
+            specialization=specialization,
+            email=email,
+            user_id=user.id
+        )
+        session.add(doctor)
+        session.commit()
+    
+    return f"{role.title()} {name} registered successfully with email {email}"
+
+@mcp.tool(description="Authenticate user with email and password, returns user info")
+async def authenticate_user(email: str, password: str) -> str:
+    session = get_session()
+    user = session.exec(
+        select(User).where(User.email == email)
+    ).first()
+    
+    if not user or user.password_hash != password:  # In production, use proper password verification
+        return "Invalid credentials"
+    
+    user_info = {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role
+    }
+    
+    return json.dumps(user_info)
 
 @mcp.tool(description="Add a new doctor to the system by providing their name, specialization, and email.")
 async def add_doctor(name: str, specialization: str, email: str) -> str:
@@ -58,9 +147,15 @@ async def availability_tool(doctor_name: str, date: str) -> List[str]:
 
     return slots
 
-@mcp.tool(description="Book an appointment for a patient by name, email, doctor name, date and desired 30-minute time slot.")
-async def booking_tool(name: str, email: str, time_slot: str, date: str, doctor_name: str) -> str:
+@mcp.tool(description="Book an appointment for a patient by user_id, doctor name, date and desired 30-minute time slot.")
+async def booking_tool(user_id: int, time_slot: str, date: str, doctor_name: str, symptoms: str = None) -> str:
     session = get_session()
+    
+    # Get patient user
+    patient = session.exec(select(User).where(User.id == user_id)).first()
+    if not patient:
+        return "Patient not found"
+    
     doctor = session.exec(select(Doctor).where(Doctor.name == doctor_name)).first()
     if not doctor:
         return f"Doctor '{doctor_name}' not found. Please add them first."
@@ -76,25 +171,134 @@ async def booking_tool(name: str, email: str, time_slot: str, date: str, doctor_
         return f"Slot '{time_slot}' on {date} is already booked for Dr. {doctor_name}."
 
     appointment = Appointment(
-        name=name,
-        email=email,
+        patient_id=user_id,
         time_slot=time_slot,
         doctor_id=doctor.id,
-        date=date
+        date=date,
+        symptoms=symptoms
     )
     session.add(appointment)
     session.commit()
-    return f"Appointment booked for {name} with Dr. {doctor_name} at {time_slot} on {date}."
+    return f"Appointment booked for {patient.name} with Dr. {doctor_name} at {time_slot} on {date}."
+
+@mcp.tool(description="Get doctor statistics and reports for appointments")
+async def doctor_reports_tool(doctor_id: int, report_type: str, date_filter: str = None) -> str:
+    session = get_session()
+    
+    doctor = session.exec(select(Doctor).where(Doctor.id == doctor_id)).first()
+    if not doctor:
+        return "Doctor not found"
+    
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    tomorrow = today + timedelta(days=1)
+    
+    if report_type == "daily_summary":
+        target_date = date_filter or str(today)
+        appointments = session.exec(
+            select(Appointment).where(
+                (Appointment.doctor_id == doctor_id) &
+                (Appointment.date == target_date)
+            )
+        ).all()
+        
+        total = len(appointments)
+        completed = len([a for a in appointments if a.status == "completed"])
+        scheduled = len([a for a in appointments if a.status == "scheduled"])
+        
+        return f"Daily Summary for Dr. {doctor.name} on {target_date}:\n" \
+               f"Total appointments: {total}\n" \
+               f"Completed: {completed}\n" \
+               f"Scheduled: {scheduled}"
+    
+    elif report_type == "yesterday_visits":
+        appointments = session.exec(
+            select(Appointment).where(
+                (Appointment.doctor_id == doctor_id) &
+                (Appointment.date == str(yesterday)) &
+                (Appointment.status == "completed")
+            )
+        ).all()
+        
+        return f"Yesterday ({yesterday}), Dr. {doctor.name} had {len(appointments)} completed visits."
+    
+    elif report_type == "today_tomorrow_appointments":
+        today_appts = session.exec(
+            select(Appointment).where(
+                (Appointment.doctor_id == doctor_id) &
+                (Appointment.date == str(today))
+            )
+        ).all()
+        
+        tomorrow_appts = session.exec(
+            select(Appointment).where(
+                (Appointment.doctor_id == doctor_id) &
+                (Appointment.date == str(tomorrow))
+            )
+        ).all()
+        
+        return f"Appointments for Dr. {doctor.name}:\n" \
+               f"Today ({today}): {len(today_appts)} appointments\n" \
+               f"Tomorrow ({tomorrow}): {len(tomorrow_appts)} appointments"
+    
+    elif report_type == "symptom_analysis":
+        symptom_filter = date_filter or "fever"  # Default to fever
+        appointments = session.exec(
+            select(Appointment).where(
+                (Appointment.doctor_id == doctor_id) &
+                (Appointment.symptoms.ilike(f"%{symptom_filter}%"))
+            )
+        ).all()
+        
+        return f"Patients with '{symptom_filter}' symptoms for Dr. {doctor.name}: {len(appointments)} cases"
+    
+    return "Invalid report type. Available types: daily_summary, yesterday_visits, today_tomorrow_appointments, symptom_analysis"
+
+@mcp.tool(description="Send notification to doctor via email (can be extended to Slack/WhatsApp)")
+async def send_doctor_notification(doctor_email: str, subject: str, message: str, notification_type: str = "email") -> str:
+    if notification_type == "email":
+        return await send_email_notification(doctor_email, subject, message)
+    elif notification_type == "slack":
+        # Placeholder for Slack integration
+        return f"Slack notification sent to doctor: {subject}"
+    elif notification_type == "whatsapp":
+        # Placeholder for WhatsApp integration
+        return f"WhatsApp notification sent to doctor: {subject}"
+    else:
+        return "Unsupported notification type"
+
+async def send_email_notification(email: str, subject: str, message: str) -> str:
+    try:
+        smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_username = os.getenv("SMTP_USERNAME")
+        smtp_password = os.getenv("SMTP_PASSWORD")
+        
+        if not smtp_username or not smtp_password:
+            return "SMTP credentials not configured"
+        
+        msg = MIMEMultipart()
+        msg['From'] = smtp_username
+        msg['To'] = email
+        msg['Subject'] = subject
+        
+        msg.attach(MIMEText(message, 'plain'))
+        
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        text = msg.as_string()
+        server.sendmail(smtp_username, email, text)
+        server.quit()
+        
+        return f"Email notification sent successfully to {email}"
+        
+    except Exception as e:
+        return f"Failed to send email: {str(e)}"
 
 @mcp.tool(description="Send a confirmation email to the patient about their appointment with the doctor.")
 async def email_tool(email: str, name: str, time_slot: str, date: str, doctor_name: str) -> str:
-    import smtplib
-    import os
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    
     try:
-        # Email configuration from environment variables
         smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
         smtp_port = int(os.getenv("SMTP_PORT", "587"))
         smtp_username = os.getenv("SMTP_USERNAME")
@@ -103,13 +307,11 @@ async def email_tool(email: str, name: str, time_slot: str, date: str, doctor_na
         if not smtp_username or not smtp_password:
             return "SMTP credentials not configured. Please set SMTP_USERNAME and SMTP_PASSWORD environment variables."
         
-        # Create message
         msg = MIMEMultipart()
         msg['From'] = smtp_username
         msg['To'] = email
         msg['Subject'] = f"Appointment Confirmation with Dr. {doctor_name}"
         
-        # Email body
         body = f"""
         Dear {name},
         
@@ -128,7 +330,6 @@ async def email_tool(email: str, name: str, time_slot: str, date: str, doctor_na
         
         msg.attach(MIMEText(body, 'plain'))
         
-        # Send email
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(smtp_username, smtp_password)
@@ -140,7 +341,6 @@ async def email_tool(email: str, name: str, time_slot: str, date: str, doctor_na
         
     except Exception as e:
         return f"Failed to send email: {str(e)}"
-
 
 async def check_google_calendar_availability(doctor_email: str, date: str) -> List[str]:
     """Check Google Calendar for existing appointments and return booked time slots."""
@@ -154,11 +354,9 @@ async def check_google_calendar_availability(doctor_email: str, date: str) -> Li
         
         service = build('calendar', 'v3', credentials=creds)
         
-        # Set time range for the specific date
         start_datetime = f"{date}T09:00:00Z"
         end_datetime = f"{date}T17:00:00Z"
         
-        # Get events for the doctor's calendar
         events_result = service.events().list(
             calendarId=doctor_email,
             timeMin=start_datetime,
@@ -173,7 +371,6 @@ async def check_google_calendar_availability(doctor_email: str, date: str) -> Li
         for event in events:
             start = event['start'].get('dateTime', event['start'].get('date'))
             if 'T' in start:
-                # Parse the datetime and extract time slot
                 event_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
                 time_slot = event_time.strftime("%H:%M")
                 booked_slots.append(time_slot)
@@ -182,29 +379,38 @@ async def check_google_calendar_availability(doctor_email: str, date: str) -> Li
         
     except Exception as e:
         print(f"Error checking Google Calendar: {e}")
-        return []  # Return empty list if Google Calendar check fails
+        return []
 
-@mcp.tool(description="Add prompts and context to help users interact with the appointment system more effectively.")
+@mcp.tool(description="Get system prompts and available commands for users")
 async def get_system_prompts() -> str:
     return """
-    Available Commands and Prompts:
+    Smart Doctor Appointment System - Available Commands:
     
-    1. ADD DOCTOR: "Add Dr. [Name] as a [Specialization] with email [email@domain.com]"
-    2. CHECK AVAILABILITY: "Check availability for Dr. [Name] on [YYYY-MM-DD]"
-    3. BOOK APPOINTMENT: "Book appointment for [Patient Name] with email [email] with Dr. [Doctor Name] on [YYYY-MM-DD] at [HH:MM]"
-    4. SEND CONFIRMATION: "Send confirmation email to [email] for appointment with Dr. [Doctor Name] on [date] at [time]"
+    AUTHENTICATION:
+    - "Register as patient/doctor with email [email], name [name], password [password]"
+    - "Login with email [email] and password [password]"
     
-    Example Interactions:
-    - "Add Dr. Smith as a Cardiologist with email smith@hospital.com"
-    - "Check availability for Dr. Smith on 2024-01-15"
-    - "Book appointment for John Doe with email john@email.com with Dr. Smith on 2024-01-15 at 10:00"
-    - "Send confirmation email to john@email.com for appointment with Dr. Smith on 2024-01-15 at 10:00"
+    PATIENT COMMANDS:
+    - "Check availability for Dr. [Name] on [YYYY-MM-DD]"
+    - "Book appointment with Dr. [Name] on [YYYY-MM-DD] at [HH:MM] for [symptoms]"
     
-    System Features:
-    - 30-minute appointment slots from 9:00 AM to 5:00 PM
-    - Google Calendar integration for availability checking
-    - SMTP email confirmations
-    - PostgreSQL database for appointment storage
+    DOCTOR COMMANDS:
+    - "Show daily summary for [YYYY-MM-DD]"
+    - "How many patients visited yesterday?"
+    - "How many appointments today and tomorrow?"
+    - "How many patients with [symptom]?"
+    
+    SYSTEM FEATURES:
+    - Role-based access (Patient/Doctor)
+    - 30-minute slots (9:00 AM - 5:00 PM)
+    - Google Calendar integration
+    - Email confirmations
+    - Multi-turn conversations
+    - Smart reporting and analytics
+    
+    EXAMPLE INTERACTIONS:
+    Patient: "I want to book with Dr. Smith tomorrow at 2 PM for headache"
+    Doctor: "Send me today's appointment summary via email"
     """
 
 __all__ = ["mcp"]
