@@ -185,7 +185,7 @@ async def booking_tool(user_id: int, time_slot: str, date: str, doctor_name: str
     email_result = await email_tool(patient.email, patient.name, time_slot, date, doctor_name)
 
     # Send SMS notification to the patient
-    patient_phone = getattr(patient, 'phone', None) or "+1234567890"  # You'll need to add phone field to User model
+    patient_phone = patient.phone or "+1234567890"  # Default phone if not provided
     sms_message = f"Your appointment with Dr. {doctor_name} on {date} at {time_slot} has been booked."
     sms_result = await send_sms_notification(patient_phone, sms_message)
 

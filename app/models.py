@@ -1,4 +1,3 @@
-
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime
@@ -16,7 +15,7 @@ class User(SQLModel, table=True):
     password_hash: str
     phone: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     # Relationships
     appointments_as_patient: List["Appointment"] = Relationship(back_populates="patient", foreign_keys="[Appointment.patient_id]")
     doctor_profile: Optional["Doctor"] = Relationship(back_populates="user", sa_relationship_kwargs={"uselist": False})
@@ -28,7 +27,7 @@ class Doctor(SQLModel, table=True):
     email: str = Field(unique=True)
     phone: Optional[str] = None
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
-    
+
     # Relationships
     user: Optional[User] = Relationship(back_populates="doctor_profile")
     appointments: List["Appointment"] = Relationship(back_populates="doctor")
@@ -43,7 +42,7 @@ class Appointment(SQLModel, table=True):
     symptoms: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     # Relationships
     patient: User = Relationship(back_populates="appointments_as_patient", foreign_keys="[Appointment.patient_id]")
     doctor: Doctor = Relationship(back_populates="appointments")
@@ -54,3 +53,16 @@ class ChatSession(SQLModel, table=True):
     session_data: str  # JSON string for context
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+```
+
+```python
+from pydantic import BaseModel
+from typing import Optional
+
+class UserRegister(BaseModel):
+    email: str
+    name: str
+    password: str
+    role: str
+    phone: Optional[str] = None
+    specialization: Optional[str] = None
