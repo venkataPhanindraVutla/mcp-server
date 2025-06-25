@@ -52,8 +52,9 @@ async def manage_session(user_id: int, action: str = "get", context_data: str = 
         else:
             return "{}"
 
-@mcp.tool(description="Register a new user (patient or doctor) with email, name, password, and role")
-async def register_user(email: str, name: str, password: str, role: str, specialization: str = None) -> str:
+@mcp.tool(description="Register a new user (patient or doctor) with email, name, password, role, and phone")
+async def register_user(email: str, name: str, password: str, role: str, phone: str = None, specialization: str = None) -> str:
+    from app.core.auth import get_password_hash
     session = get_session()
 
     # Check if user already exists
@@ -61,12 +62,13 @@ async def register_user(email: str, name: str, password: str, role: str, special
     if existing_user:
         return f"User with email {email} already exists"
 
-    # Create new user
+    # Create new user with hashed password
     user = User(
         email=email,
         name=name,
-        password_hash=password,  # In production, use proper hashing
-        role=UserRole(role.lower())
+        password_hash=get_password_hash(password),
+        role=UserRole(role.lower()),
+        phone=phone
     )
     session.add(user)
     session.commit()

@@ -3,8 +3,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlmodel import select
 from app.core.database import get_session
 from app.models import User, Doctor, Appointment, UserRole
+from app.core.auth import create_access_token, get_password_hash, verify_password, get_current_user
 from pydantic import BaseModel
 from typing import Optional, List
+from datetime import timedelta
 import json
 
 router = APIRouter(tags=["General"])
@@ -85,11 +87,11 @@ async def register_user(user_data: UserRegister):
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
 
-    # Create user
+    # Create user with hashed password
     user = User(
         email=user_data.email,
         name=user_data.name,
-        password_hash=user_data.password,  # In production, hash this
+        password_hash=get_password_hash(user_data.password),
         role=UserRole(user_data.role.lower()),
         phone=user_data.phone
     )
@@ -123,11 +125,19 @@ async def login_user(login_data: UserLogin):
     session = get_session()
     user = session.exec(select(User).where(User.email == login_data.email)).first()
 
-    if not user or user.password_hash != login_data.password:
+    if not user or not verify_password(login_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Create JWT token
+    access_token_expires = timedelta(minutes=30)
+    access_token = create_access_token(
+        data={"sub": str(user.id), "email": user.email}, 
+        expires_delta=access_token_expires
+    )
+
     return {
-        "message": "Login successful",
+        "access_token": access_token,
+        "token_type": "bearer",
         "user": {
             "id": user.id,
             "name": user.name,
@@ -142,8 +152,20 @@ async def get_users():
     users = session.exec(select(User)).all()
     return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role} for u in users]
 
+@router.get("/current-user")
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current user information from JWT token"""
+    return {
+        "id": current_user.id,
+        "name": current_user.name,
+        "email": current_user.email,
+        "role": current_user.role,
+        "phone": current_user.phone
+    }
+
 @router.get("/current-user/{user_id}")
-async def get_current_user(user_id: int):
+async def get_user_by_id(user_id: int):
+    """Get user by ID (for backward compatibility)"""
     session = get_session()
     user = session.exec(select(User).where(User.id == user_id)).first()
     if not user:
@@ -153,7 +175,8 @@ async def get_current_user(user_id: int):
         "id": user.id,
         "name": user.name,
         "email": user.email,
-        "role": user.role
+        "role": user.role,
+        "phone": user.phone
     }
 
 # Doctor endpoints
@@ -225,82 +248,15 @@ async def chat_with_ai(user_id: int, message: str):
     Natural language interface using Gemini LLM to process requests and use MCP tools
     """
     try:
-        import google.generativeai as genai
-        import os
-        
-        # Configure Gemini
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return {"error": "Gemini API key not configured. Please set GEMINI_API_KEY environment variable."}
-        
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-pro')
-        
-        # Get user context
-        session = get_session()
-        user = session.exec(select(User).where(User.id == user_id)).first()
-        if not user:
-            return {"error": "User not found"}
-        
-        # Load conversation context
-        from app.tools.tools import manage_session
-        context = await manage_session(user_id, "get")
-        context_data = json.loads(context) if context else {}
-        
-        # Build system prompt with available tools
-        system_prompt = f"""
-        You are an AI assistant for a smart doctor appointment system. 
-        Current user: {user.name} (Role: {user.role})
-        
-        Available MCP tools you can use:
-        - availability_tool(doctor_name, date) - Check doctor availability
-        - booking_tool(user_id, time_slot, date, doctor_name, symptoms) - Book appointments
-        - doctor_reports_tool(doctor_id, report_type, date_filter) - Generate reports for doctors
-        - send_doctor_notification(doctor_email, subject, message, notification_type) - Send notifications
-        
-        Context from previous conversation: {context_data}
-        
-        Parse the user's message and determine what action to take. If you need to use tools, 
-        respond with a JSON object containing the tool name and parameters.
-        """
-        
-        # Generate response
-        full_prompt = f"{system_prompt}\n\nUser message: {message}"
-        response = model.generate_content(full_prompt)
-        ai_response = response.text
-        
-        # Try to parse if it's a tool call
-        if "availability_tool" in ai_response.lower() or "booking_tool" in ai_response.lower():
-            # Extract and execute tool calls
-            from app.tools.tools import availability_tool, booking_tool, doctor_reports_tool
-            
-            if "check availability" in message.lower() or "available" in message.lower():
-                # Try to extract doctor name and date from message
-                words = message.split()
-                doctor_name = "Dr. Smith"  # Default, should be extracted better
-                date = "2024-01-20"  # Default, should be extracted better
-                
-                for i, word in enumerate(words):
-                    if word.lower().startswith("dr.") or word.lower() == "doctor":
-                        if i + 1 < len(words):
-                            doctor_name = f"Dr. {words[i + 1]}"
-                
-                slots = await availability_tool(doctor_name, date)
-                ai_response = f"Available slots for {doctor_name} on {date}: {', '.join(slots)}"
-            
-            elif "book" in message.lower() and user.role == "patient":
-                # Extract booking details and call booking_tool
-                ai_response = "I can help you book an appointment. Please provide: doctor name, date, time, and symptoms."
-        
-        # Update conversation context
-        context_data["last_message"] = message
-        context_data["last_response"] = ai_response
-        await manage_session(user_id, "update", json.dumps(context_data))
-        
-        return {"response": ai_response, "user_id": user_id, "user_role": user.role}
+        from app.core.llm import llm_service
+        result = await llm_service.process_chat_message(user_id, message)
+        return result
         
     except Exception as e:
-        return {"error": f"LLM processing failed: {str(e)}", "fallback_response": "I'm sorry, I couldn't process your request. Please try again or use specific commands."}
+        return {
+            "error": f"LLM service unavailable: {str(e)}", 
+            "fallback_response": "I'm sorry, the AI service is currently unavailable. Please try again later."
+        }
 
 # Session management for conversation continuity
 @router.post("/session")

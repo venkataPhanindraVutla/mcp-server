@@ -19,6 +19,8 @@ class User(SQLModel, table=True):
     # Relationships
     appointments_as_patient: List["Appointment"] = Relationship(back_populates="patient", foreign_keys="[Appointment.patient_id]")
     doctor_profile: Optional["Doctor"] = Relationship(back_populates="user", sa_relationship_kwargs={"uselist": False})
+    chat_sessions: List["ChatSession"] = Relationship(back_populates="user")
+
 
 class Doctor(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -54,9 +56,7 @@ class ChatSession(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     user: Optional[User] = Relationship(back_populates="chat_sessions")
-```
 
-```python
 from pydantic import BaseModel
 from typing import Optional
 
