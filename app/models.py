@@ -11,9 +11,9 @@ class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     name: str
-    role: UserRole
     password_hash: str
-    phone: Optional[str] = None
+    phone: Optional[str] = Field(default=None)
+    role: UserRole
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Relationships
@@ -25,7 +25,7 @@ class Doctor(SQLModel, table=True):
     name: str
     specialization: str
     email: str = Field(unique=True)
-    phone: Optional[str] = None
+    phone: Optional[str] = Field(default=None)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
 
     # Relationships
@@ -53,6 +53,7 @@ class ChatSession(SQLModel, table=True):
     session_data: str  # JSON string for context
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    user: Optional[User] = Relationship(back_populates="chat_sessions")
 ```
 
 ```python

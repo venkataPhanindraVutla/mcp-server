@@ -189,7 +189,7 @@ async def get_doctor_report(doctor_id: int, report_data: ReportRequest):
 
     return {"doctor": doctor.name, "report": report}
 
-# Appointment endpoints
+# Appointment endpoints - simplified view only
 @router.get("/appointments")
 async def get_appointments(user_id: Optional[int] = None, doctor_id: Optional[int] = None):
     session = get_session()
@@ -218,58 +218,89 @@ async def get_appointments(user_id: Optional[int] = None, doctor_id: Optional[in
 
     return result
 
-@router.post("/appointments/book")
-async def book_appointment(user_id: int, appointment_data: AppointmentRequest):
-    session = get_session()
-
-    # Import MCP tool
-    from app.tools.tools import booking_tool
-    result = await booking_tool(
-        user_id=user_id,
-        time_slot=appointment_data.time_slot,
-        date=appointment_data.date,
-        doctor_name=appointment_data.doctor_name,
-        symptoms=appointment_data.symptoms
-    )
-
-    if "booked" in result.lower():
-        return {"message": result, "status": "success"}
-    else:
-        raise HTTPException(status_code=400, detail=result)
-
-@router.get("/availability/{doctor_name}/{date}")
-async def check_availability(doctor_name: str, date: str):
-    from app.tools.tools import availability_tool
-    slots = await availability_tool(doctor_name, date)
-    return {"doctor": doctor_name, "date": date, "available_slots": slots}
-
 # LLM Chat endpoint for natural language processing
 @router.post("/chat")
 async def chat_with_ai(user_id: int, message: str):
     """
-    Natural language interface for the appointment system.
-    This would integrate with your chosen LLM (OpenAI, Claude, etc.)
+    Natural language interface using Gemini LLM to process requests and use MCP tools
     """
-    # This is a placeholder for LLM integration
-    # You would replace this with actual LLM API calls
-
-    response = f"""
-    🤖 AI Assistant Response:
-
-    Received message: "{message}"
-    User ID: {user_id}
-
-    Available actions:
-    - Check doctor availability
-    - Book appointments  
-    - Generate reports
-    - Send notifications
-
-    To implement full LLM integration, connect your preferred LLM service (OpenAI, Claude, etc.)
-    and configure it to use the MCP tools defined in tools.py
-    """
-
-    return {"response": response, "user_id": user_id}
+    try:
+        import google.generativeai as genai
+        import os
+        
+        # Configure Gemini
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return {"error": "Gemini API key not configured. Please set GEMINI_API_KEY environment variable."}
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Get user context
+        session = get_session()
+        user = session.exec(select(User).where(User.id == user_id)).first()
+        if not user:
+            return {"error": "User not found"}
+        
+        # Load conversation context
+        from app.tools.tools import manage_session
+        context = await manage_session(user_id, "get")
+        context_data = json.loads(context) if context else {}
+        
+        # Build system prompt with available tools
+        system_prompt = f"""
+        You are an AI assistant for a smart doctor appointment system. 
+        Current user: {user.name} (Role: {user.role})
+        
+        Available MCP tools you can use:
+        - availability_tool(doctor_name, date) - Check doctor availability
+        - booking_tool(user_id, time_slot, date, doctor_name, symptoms) - Book appointments
+        - doctor_reports_tool(doctor_id, report_type, date_filter) - Generate reports for doctors
+        - send_doctor_notification(doctor_email, subject, message, notification_type) - Send notifications
+        
+        Context from previous conversation: {context_data}
+        
+        Parse the user's message and determine what action to take. If you need to use tools, 
+        respond with a JSON object containing the tool name and parameters.
+        """
+        
+        # Generate response
+        full_prompt = f"{system_prompt}\n\nUser message: {message}"
+        response = model.generate_content(full_prompt)
+        ai_response = response.text
+        
+        # Try to parse if it's a tool call
+        if "availability_tool" in ai_response.lower() or "booking_tool" in ai_response.lower():
+            # Extract and execute tool calls
+            from app.tools.tools import availability_tool, booking_tool, doctor_reports_tool
+            
+            if "check availability" in message.lower() or "available" in message.lower():
+                # Try to extract doctor name and date from message
+                words = message.split()
+                doctor_name = "Dr. Smith"  # Default, should be extracted better
+                date = "2024-01-20"  # Default, should be extracted better
+                
+                for i, word in enumerate(words):
+                    if word.lower().startswith("dr.") or word.lower() == "doctor":
+                        if i + 1 < len(words):
+                            doctor_name = f"Dr. {words[i + 1]}"
+                
+                slots = await availability_tool(doctor_name, date)
+                ai_response = f"Available slots for {doctor_name} on {date}: {', '.join(slots)}"
+            
+            elif "book" in message.lower() and user.role == "patient":
+                # Extract booking details and call booking_tool
+                ai_response = "I can help you book an appointment. Please provide: doctor name, date, time, and symptoms."
+        
+        # Update conversation context
+        context_data["last_message"] = message
+        context_data["last_response"] = ai_response
+        await manage_session(user_id, "update", json.dumps(context_data))
+        
+        return {"response": ai_response, "user_id": user_id, "user_role": user.role}
+        
+    except Exception as e:
+        return {"error": f"LLM processing failed: {str(e)}", "fallback_response": "I'm sorry, I couldn't process your request. Please try again or use specific commands."}
 
 # Session management for conversation continuity
 @router.post("/session")

@@ -13,3 +13,6 @@ google-auth-oauthlib==1.0.0
 twilio==8.10.0
 sendgrid
 twilio
+google-generativeai
+python-jose[cryptography]
+passlib[bcrypt]
