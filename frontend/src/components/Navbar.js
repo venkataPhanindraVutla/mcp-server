@@ -14,7 +14,6 @@ import {
   LocalHospital,
   AccountCircle,
   Dashboard,
-  Calendar,
   Chat,
   Assessment
 } from '@mui/icons-material';

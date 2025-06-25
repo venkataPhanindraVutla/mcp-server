@@ -46,7 +46,7 @@ class Appointment(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Relationships
-    patient: User = Relationship(back_populates="appointments_as_patient", foreign_keys="[Appointment.patient_id]")
+    patient: User = Relationship(back_populates="appointments_as_patient")
     doctor: Doctor = Relationship(back_populates="appointments")
 
 class ChatSession(SQLModel, table=True):
