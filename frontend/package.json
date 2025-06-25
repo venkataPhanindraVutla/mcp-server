@@ -1,20 +1,20 @@
-
 {
   "name": "smart-doctor-frontend",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@mui/material": "^5.15.3",
     "@emotion/react": "^11.11.1",
     "@emotion/styled": "^11.11.0",
     "@mui/icons-material": "^5.15.3",
+    "@mui/material": "^5.15.3",
     "@mui/x-date-pickers": "^6.18.1",
     "axios": "^1.6.5",
     "date-fns": "^2.30.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.1",
-    "react-scripts": "5.0.1"
+    "react-scripts": "5.0.1",
+    "web-vitals": "^5.0.3"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -34,5 +34,10 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://localhost:5000"
+  "proxy": "http://localhost:5000",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }

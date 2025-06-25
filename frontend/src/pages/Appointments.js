@@ -11,7 +11,7 @@ import {
   CircularProgress,
   Button
 } from '@mui/material';
-import { Calendar, Person, LocalHospital, AccessTime } from '@mui/icons-material';
+import { CalendarToday ,Person, LocalHospital, AccessTime } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -127,7 +127,7 @@ const Appointments = () => {
                   </Box>
 
                   <Box display="flex" alignItems="center" mb={1}>
-                    <Calendar fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
+                    <CalendarToday fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                     <Typography variant="body2" color="text.secondary">
                       {formatDate(appointment.date)}
                     </Typography>
