@@ -17,7 +17,7 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Relationships
-    appointments_as_patient: List["Appointment"] = Relationship(back_populates="patient", foreign_keys="[Appointment.patient_id]")
+    appointments_as_patient: List["Appointment"] = Relationship(back_populates="patient")
     doctor_profile: Optional["Doctor"] = Relationship(back_populates="user", sa_relationship_kwargs={"uselist": False})
     chat_sessions: List["ChatSession"] = Relationship(back_populates="user")
 

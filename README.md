@@ -1,3 +1,4 @@
+
 # 🏥 Smart Doctor Appointment System
 ## 🧠 Agentic AI with MCP Integration
 
@@ -6,15 +7,16 @@ A full-stack web application that demonstrates agentic AI behavior using Model C
 ## 🎯 Features
 
 ### ✨ Core Functionality
-- **Role-based Authentication**: Patient and Doctor roles with secure login
+- **JWT Authentication**: Secure role-based authentication for Patients and Doctors
 - **Smart Appointment Scheduling**: AI-powered natural language booking
 - **Multi-turn Conversations**: Context-aware chat sessions
 - **Doctor Analytics**: AI-generated reports and summaries
-- **Email & SMS Notifications**: Automated confirmations and alerts via SMTP and Twilio
+- **Email & SMS Notifications**: Automated confirmations and alerts
 - **Google Calendar Integration**: Real-time availability checking
+- **React Frontend**: Modern, responsive user interface
 
 ### 🤖 AI Capabilities
-- Natural language appointment booking
+- Natural language appointment booking via Gemini LLM
 - Intelligent doctor report generation
 - Context-aware conversation handling
 - Automated scheduling conflict resolution
@@ -23,10 +25,11 @@ A full-stack web application that demonstrates agentic AI behavior using Model C
 
 ### Prerequisites
 - Python 3.12+
+- Node.js 18+ (for React frontend)
 - PostgreSQL database
 - Gmail account (for SMTP)
-- Twilio account (for SMS)
-- Google Calendar API credentials (optional)
+- Gemini API key
+- Twilio account (for SMS, optional)
 
 ### Environment Setup
 
@@ -40,13 +43,19 @@ POSTGRES_DB=appointments
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 
+# JWT Configuration
+JWT_SECRET_KEY=your-super-secret-jwt-key-change-this-in-production
+
 # SMTP Configuration (Gmail)
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your_email@gmail.com
 SMTP_PASSWORD=your_app_password
 
-# Twilio Configuration (SMS)
+# Gemini API Configuration
+GEMINI_API_KEY=your_gemini_api_key
+
+# Twilio Configuration (Optional)
 TWILIO_ACCOUNT_SID=your_twilio_account_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_PHONE_NUMBER=+1234567890
@@ -57,26 +66,45 @@ GOOGLE_CALENDAR_CREDENTIALS={"token": "your_token", "refresh_token": "your_refre
 
 ### Installation & Running
 
-1. **Install Dependencies**:
+1. **Install Backend Dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Start the Server**:
+2. **Install Frontend Dependencies**:
    ```bash
-   uvicorn server:app --host 0.0.0.0 --port 5000
+   cd frontend
+   npm install
    ```
 
-3. **Access the Application**:
-   - API: `http://localhost:5000`
-   - Documentation: `http://localhost:5000/docs`
-   - Dashboard: `http://localhost:5000/dashboard`
+3. **Start the Backend Server**:
+   ```bash
+   uvicorn server:app --host 0.0.0.0 --port 5000 --reload
+   ```
 
-## 📚 API Documentation
+4. **Start the Frontend (in another terminal)**:
+   ```bash
+   cd frontend
+   npm start
+   ```
 
-### 🔐 Authentication Endpoints
+5. **Access the Application**:
+   - Backend API: `http://localhost:5000`
+   - Frontend: `http://localhost:3000`
+   - API Docs: `http://localhost:5000/docs`
 
-#### POST `/register`
+## 📚 Complete API Documentation
+
+### Base URL
+```
+http://localhost:5000
+```
+
+---
+
+## 🔐 Authentication Endpoints
+
+### POST `/register`
 Register a new user (patient or doctor)
 
 **Request Body**:
@@ -91,7 +119,7 @@ Register a new user (patient or doctor)
 }
 ```
 
-**Response**:
+**Response (200)**:
 ```json
 {
   "message": "Patient registered successfully",
@@ -104,8 +132,17 @@ Register a new user (patient or doctor)
 }
 ```
 
-#### POST `/login`
-Authenticate user
+**Error (400)**:
+```json
+{
+  "detail": "User already exists"
+}
+```
+
+---
+
+### POST `/login`
+Authenticate user and get JWT token
 
 **Request Body**:
 ```json
@@ -115,10 +152,11 @@ Authenticate user
 }
 ```
 
-**Response**:
+**Response (200)**:
 ```json
 {
-  "message": "Login successful",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
   "user": {
     "id": 1,
     "name": "John Doe",
@@ -128,12 +166,59 @@ Authenticate user
 }
 ```
 
-### 👨‍⚕️ Doctor Management
+**Error (401)**:
+```json
+{
+  "detail": "Invalid credentials"
+}
+```
 
-#### GET `/doctors`
+---
+
+### GET `/current-user`
+Get current authenticated user info
+
+**Headers**:
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (200)**:
+```json
+{
+  "id": 1,
+  "name": "John Doe",
+  "email": "user@example.com",
+  "role": "patient",
+  "phone": "+1234567890"
+}
+```
+
+---
+
+### GET `/users`
+Get all users (for admin purposes)
+
+**Response (200)**:
+```json
+[
+  {
+    "id": 1,
+    "name": "John Doe",
+    "email": "user@example.com",
+    "role": "patient"
+  }
+]
+```
+
+---
+
+## 👨‍⚕️ Doctor Management
+
+### GET `/doctors`
 Get all doctors
 
-**Response**:
+**Response (200)**:
 ```json
 [
   {
@@ -145,8 +230,35 @@ Get all doctors
 ]
 ```
 
-#### POST `/doctors/{doctor_id}/reports`
+---
+
+### POST `/doctors`
+Add a new doctor
+
+**Query Parameters**:
+- `name` (string): Doctor's name
+- `specialization` (string): Medical specialization
+- `email` (string): Doctor's email
+
+**Example**:
+```
+POST /doctors?name=Dr.%20Smith&specialization=Cardiology&email=dr.smith@hospital.com
+```
+
+**Response (200)**:
+```json
+{
+  "message": "Doctor Dr. Smith added successfully"
+}
+```
+
+---
+
+### POST `/doctors/{doctor_id}/reports`
 Generate doctor reports
+
+**Path Parameters**:
+- `doctor_id` (int): Doctor's ID
 
 **Request Body**:
 ```json
@@ -160,22 +272,52 @@ Generate doctor reports
 - `daily_summary`: Daily appointment summary
 - `yesterday_visits`: Yesterday's completed visits
 - `today_tomorrow_appointments`: Today and tomorrow's appointments
-- `symptom_analysis`: Filter by symptoms (use date_filter for symptom)
+- `symptom_analysis`: Filter by symptoms (use date_filter for symptom keyword)
 
-### 📅 Appointment Management
+**Response (200)**:
+```json
+{
+  "doctor": "Dr. Smith",
+  "report": {
+    "summary": "Today you have 5 appointments scheduled...",
+    "details": [...]
+  }
+}
+```
 
-#### GET `/appointments`
+---
+
+## 📅 Appointment Management
+
+### GET `/appointments`
 Get appointments with optional filters
 
-**Query Parameters** (optional):
-- `user_id`: Filter by patient ID
-- `doctor_id`: Filter by doctor ID
+**Query Parameters** (all optional):
+- `user_id` (int): Filter by patient ID
+- `doctor_id` (int): Filter by doctor ID
 
-#### POST `/appointments/book`
+**Response (200)**:
+```json
+[
+  {
+    "id": 1,
+    "patient_name": "John Doe",
+    "doctor_name": "Dr. Smith",
+    "date": "2024-01-15",
+    "time_slot": "10:00",
+    "status": "scheduled",
+    "symptoms": "headache"
+  }
+]
+```
+
+---
+
+### POST `/appointments/book`
 Book an appointment
 
 **Query Parameters**:
-- `user_id`: Patient's user ID
+- `user_id` (int): Patient's user ID
 
 **Request Body**:
 ```json
@@ -187,18 +329,36 @@ Book an appointment
 }
 ```
 
-**Response**:
+**Response (200)**:
 ```json
 {
-  "message": "Appointment booked for John Doe with Dr. Smith at 10:00 on 2024-01-15. Confirmation email sent successfully. SMS sent successfully!",
+  "message": "Appointment booked for John Doe with Dr. Smith at 10:00 on 2024-01-15. Confirmation email sent successfully.",
   "status": "success"
 }
 ```
 
-#### GET `/availability/{doctor_name}/{date}`
+**Error (400)**:
+```json
+{
+  "detail": "Doctor not available at this time"
+}
+```
+
+---
+
+### GET `/availability/{doctor_name}/{date}`
 Check doctor availability
 
-**Response**:
+**Path Parameters**:
+- `doctor_name` (string): Doctor's name (URL encoded)
+- `date` (string): Date in YYYY-MM-DD format
+
+**Example**:
+```
+GET /availability/Dr.%20Smith/2024-01-15
+```
+
+**Response (200)**:
 ```json
 {
   "doctor": "Dr. Smith",
@@ -207,84 +367,190 @@ Check doctor availability
 }
 ```
 
-### 💬 AI Chat Interface
+---
 
-#### POST `/chat`
-Natural language interface for the appointment system
+## 💬 AI Chat Interface
+
+### POST `/chat`
+Natural language interface powered by Gemini LLM
 
 **Query Parameters**:
-- `user_id`: User ID for context
-- `message`: Natural language message
+- `user_id` (int): User ID for context
+- `message` (string): Natural language message
+
+**Example**:
+```
+POST /chat?user_id=1&message=I%20want%20to%20book%20an%20appointment%20with%20Dr.%20Smith%20tomorrow%20at%202%20PM
+```
 
 **Example Messages**:
 - "I want to book an appointment with Dr. Smith tomorrow at 2 PM"
 - "Check Dr. Johnson's availability for Friday"
 - "How many patients did I see yesterday?" (for doctors)
+- "Cancel my appointment with Dr. Smith"
+- "Reschedule my appointment to next week"
 
-### 🗣️ Session Management
+**Response (200)**:
+```json
+{
+  "response": "I'll help you book an appointment with Dr. Smith. Let me check availability for tomorrow at 2 PM...",
+  "action_taken": "checked_availability",
+  "status": "success"
+}
+```
 
-#### POST `/session`
+---
+
+## 🗣️ Session Management
+
+### POST `/session`
 Manage chat sessions for conversation continuity
 
 **Query Parameters**:
-- `user_id`: User ID
-- `action`: "create", "update", or "get"
-- `context_data`: JSON string (optional)
+- `user_id` (int): User ID
+- `action` (string): "create", "update", or "get"
+- `context_data` (string, optional): JSON string
 
-## 🔧 MCP Tools
+**Example**:
+```
+POST /session?user_id=1&action=create&context_data={"last_inquiry":"appointment_booking"}
+```
 
-The system exposes the following MCP tools for AI agents:
+**Response (200)**:
+```json
+{
+  "result": "Session created successfully"
+}
+```
 
-### Authentication Tools
-- `register_user`: Register new users
-- `authenticate_user`: User login
-- `manage_session`: Handle conversation context
+---
 
-### Appointment Tools
-- `add_doctor`: Add doctors to the system
-- `availability_tool`: Check doctor availability
-- `booking_tool`: Book appointments
-- `email_tool`: Send confirmation emails
-- `send_sms_notification`: Send SMS notifications via Twilio
+### GET `/session/{user_id}`
+Get chat session context
 
-### Reporting Tools
-- `doctor_reports_tool`: Generate various doctor reports
-- `send_doctor_notification`: Send notifications to doctors
+**Path Parameters**:
+- `user_id` (int): User ID
 
-### System Tools
-- `get_system_prompts`: Get available commands and help
+**Response (200)**:
+```json
+{
+  "user_id": 1,
+  "context": {
+    "last_inquiry": "appointment_booking",
+    "preferred_doctor": "Dr. Smith",
+    "last_interaction": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+---
+
+## 🏠 System Endpoints
+
+### GET `/`
+Application homepage with feature overview
+
+**Response (200)**:
+```html
+<h1>🏥 Smart Doctor Appointment System</h1>
+<h2>🧠 Agentic AI with MCP Integration</h2>
+<!-- Feature list and links -->
+```
+
+---
+
+### GET `/status`
+System health and configuration status
+
+**Response (200)**:
+```json
+{
+  "status": "running",
+  "version": "1.0.0",
+  "features": {
+    "authentication": "JWT-based (Patient/Doctor)",
+    "appointments": "Smart scheduling with AI",
+    "reports": "AI-powered analytics",
+    "integrations": ["Google Calendar", "SMTP Email", "PostgreSQL", "Gemini LLM"],
+    "conversation": "Multi-turn support with context"
+  },
+  "mcp_tools": [
+    "register_user", "authenticate_user", "manage_session",
+    "add_doctor", "availability_tool", "booking_tool",
+    "doctor_reports_tool", "send_doctor_notification",
+    "email_tool", "get_system_prompts"
+  ],
+  "endpoints": {
+    "auth": ["/register", "/login", "/users", "/current-user"],
+    "appointments": ["/appointments", "/appointments/book", "/availability"],
+    "doctors": ["/doctors", "/doctors/reports"],
+    "system": ["/", "/status", "/dashboard"]
+  }
+}
+```
+
+---
+
+### GET `/dashboard`
+Web dashboard for system overview
+
+**Response**: HTML dashboard page
+
+---
 
 ## 🎯 Usage Examples
 
-### Scenario 1: Patient Appointment Scheduling
-```
-Patient: "I want to book an appointment with Dr. Ahuja tomorrow morning"
-System: 
-1. Checks Dr. Ahuja's availability for tomorrow morning
-2. Shows available slots (9:00 AM, 9:30 AM, 10:00 AM)
-3. Patient selects preferred time
-4. Books appointment
-5. Sends email confirmation to patient
-6. Sends SMS notification to patient
+### Example 1: Complete Patient Workflow
+
+1. **Register as Patient**:
+```bash
+curl -X POST "http://localhost:5000/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "patient@example.com",
+    "name": "John Doe",
+    "password": "password123",
+    "role": "patient",
+    "phone": "+1234567890"
+  }'
 ```
 
-### Scenario 2: Doctor Reports and Notifications
-```
-Doctor: "How many patients visited yesterday?"
-System:
-1. Queries database for yesterday's completed appointments
-2. Generates summary report
-3. Sends SMS notification to doctor with summary
+2. **Login and Get Token**:
+```bash
+curl -X POST "http://localhost:5000/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "patient@example.com",
+    "password": "password123"
+  }'
 ```
 
-### Multi-turn Conversation Example
+3. **Book Appointment via AI Chat**:
+```bash
+curl -X POST "http://localhost:5000/chat?user_id=1&message=I%20want%20to%20book%20an%20appointment%20with%20Dr.%20Smith%20tomorrow%20at%202%20PM"
 ```
-Patient: "Check Dr. Smith's availability for Friday afternoon"
-System: "Available slots: 2:00 PM, 2:30 PM, 3:00 PM, 4:00 PM"
 
-Patient: "Book the 3 PM slot"
-System: Uses conversation context → Books 3:00 PM appointment with Dr. Smith for Friday
+### Example 2: Doctor Report Workflow
+
+1. **Register as Doctor**:
+```bash
+curl -X POST "http://localhost:5000/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "doctor@example.com",
+    "name": "Dr. Smith",
+    "password": "password123",
+    "role": "doctor",
+    "specialization": "Cardiology"
+  }'
 ```
+
+2. **Get Daily Report via AI**:
+```bash
+curl -X POST "http://localhost:5000/chat?user_id=2&message=How%20many%20patients%20do%20I%20have%20today?"
+```
+
+---
 
 ## 🔧 Technical Architecture
 
@@ -292,16 +558,16 @@ System: Uses conversation context → Books 3:00 PM appointment with Dr. Smith f
 - **FastAPI**: Modern web framework with automatic API documentation
 - **SQLModel**: Type-safe database operations with Pydantic integration
 - **PostgreSQL**: Robust relational database
+- **JWT**: Secure token-based authentication
+- **Gemini LLM**: Google's AI for natural language processing
 - **MCP (Model Context Protocol)**: Tool exposure for AI agents
-- **Twilio**: SMS notifications
-- **SMTP**: Email notifications
 
-### Key Components
-- **Authentication**: Role-based system (Patient/Doctor)
-- **Session Management**: Conversation context tracking
-- **Notification System**: Both email and SMS
-- **Calendar Integration**: Google Calendar API
-- **AI Tools**: MCP-exposed functions for LLM interaction
+### Frontend Stack
+- **React**: Modern UI library
+- **TypeScript**: Type-safe JavaScript
+- **Axios**: HTTP client for API calls
+- **React Router**: Client-side routing
+- **Material-UI**: Component library
 
 ### Database Schema
 ```sql
@@ -318,57 +584,77 @@ appointments: id, patient_id, doctor_id, date, time_slot, status, symptoms, note
 chatsessions: id, user_id, session_data, created_at, updated_at
 ```
 
-## 🚀 Deployment
+---
 
-### Local Development
-```bash
-uvicorn server:app --host 0.0.0.0 --port 5000 --reload
-```
+## 🚀 Deployment on Replit
 
-### Production (Replit)
-```bash
-uvicorn server:app --host 0.0.0.0 --port 5000
-```
+### Backend Deployment
+1. Set environment variables in Replit Secrets
+2. Configure the run command: `uvicorn server:app --host 0.0.0.0 --port 5000`
+3. Deploy using Replit's deployment feature
 
-## ✅ Requirements Implementation Status
-
-### ✅ Completed Features
-- **Role-based Authentication**: Patient and Doctor roles implemented
-- **Natural Language Appointment Booking**: MCP tools for AI agent interaction
-- **Multi-turn Conversations**: Session context management
-- **Doctor Reports**: Multiple report types with AI-generated summaries
-- **Dual Notification System**: Email for bookings, SMS for doctor notifications
-- **Google Calendar Integration**: Real-time availability checking
-- **PostgreSQL Database**: Complete data persistence
-- **MCP Integration**: All required tools exposed
-- **FastAPI Backend**: RESTful API with auto-documentation
-
-### 🚧 Recommended Enhancements
-- **Frontend React Application**: Currently backend-only
-- **JWT Authentication**: Upgrade from basic auth
-- **LLM Integration**: Connect actual LLM provider for chat endpoint
-- **Advanced Auto-rescheduling**: AI-powered conflict resolution
-
-## 📝 Setup Instructions
-
-1. **Environment Variables**: Configure all required environment variables in `.env`
-2. **Database**: Ensure PostgreSQL is running and accessible
-3. **Twilio**: Set up Twilio account for SMS functionality
-4. **Gmail**: Configure Gmail app password for SMTP
-5. **Google Calendar**: Optional - set up API credentials for calendar integration
-
-## 🎯 Demo Scenarios
-
-### Patient Workflow
-1. Register as patient with phone number
-2. Use natural language to request appointment
-3. Receive email confirmation and SMS notification
-
-### Doctor Workflow  
-1. Register as doctor with specialization
-2. Request daily/weekly reports via natural language
-3. Receive SMS notifications with summaries
+### Frontend Deployment
+1. Build the React app: `npm run build`
+2. Serve static files through FastAPI or deploy separately
+3. Update API base URL for production
 
 ---
 
-**🚀 A complete agentic AI solution for healthcare appointment management!**
+## 🎯 Demo Scenarios
+
+### Scenario 1: Patient Natural Language Booking
+```
+Patient: "I want to book an appointment with Dr. Ahuja tomorrow morning"
+System: 
+1. ✅ Parses natural language using Gemini LLM
+2. ✅ Checks Dr. Ahuja's availability via MCP tools
+3. ✅ Shows available morning slots (9:00 AM, 9:30 AM, 10:00 AM)
+4. ✅ Patient selects preferred time
+5. ✅ Books appointment in database
+6. ✅ Sends email confirmation
+7. ✅ Updates Google Calendar (if configured)
+```
+
+### Scenario 2: Multi-turn Conversation
+```
+Patient: "Check Dr. Smith's availability for Friday afternoon"
+System: "Available slots: 2:00 PM, 2:30 PM, 3:00 PM, 4:00 PM"
+
+Patient: "Book the 3 PM slot"
+System: ✅ Uses conversation context → Books 3:00 PM appointment with Dr. Smith for Friday
+```
+
+### Scenario 3: Doctor Analytics
+```
+Doctor: "How many patients visited yesterday?"
+System:
+1. ✅ Queries database for yesterday's completed appointments
+2. ✅ Generates AI-powered summary using Gemini
+3. ✅ Sends SMS notification to doctor with summary
+```
+
+---
+
+## ✅ Requirements Implementation Status
+
+### ✅ Fully Implemented
+- **✅ Role-based JWT Authentication**: Secure patient/doctor login
+- **✅ Natural Language Processing**: Gemini LLM integration
+- **✅ MCP Tool Integration**: All required tools exposed
+- **✅ Multi-turn Conversations**: Context-aware sessions
+- **✅ Doctor Reports**: Multiple AI-powered report types
+- **✅ Email Notifications**: SMTP integration for confirmations
+- **✅ Database Integration**: PostgreSQL with full schema
+- **✅ API Documentation**: Comprehensive endpoint documentation
+- **✅ Error Handling**: Proper HTTP status codes and messages
+- **✅ React Frontend**: Modern, responsive user interface
+
+### 🚧 Optional Enhancements
+- **📅 Google Calendar Integration**: Available but requires setup
+- **📱 SMS Notifications**: Twilio integration available
+- **🔐 Advanced Security**: Rate limiting, input validation
+- **📊 Advanced Analytics**: More detailed reporting features
+
+---
+
+**🚀 A complete agentic AI solution for healthcare appointment management with modern React frontend!**
